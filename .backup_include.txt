@@ -1,0 +1,16 @@
+.gnupg/
+.hydrogen/
+.sonic-pi/
+.ssh/
+.vst/
+.vst3/
+Desktop/
+Documents/
+Downloads/
+Library/
+NetworkSessions/
+Pictures/
+Recordings/
+Studio/
+Videos/
+Workspace/

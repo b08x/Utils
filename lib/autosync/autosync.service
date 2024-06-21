@@ -1,0 +1,11 @@
+# service to watch for usb presence
+[Unit]
+Description=MediaSync trigger
+Requires=dev-disk-by\x2dlabel-mediasync.device
+After=dev-disk-by\x2dlabel-mediasync.device
+
+[Service]
+ExecStart=/usr/local/bin/autosync.sh
+
+[Install]
+WantedBy=dev-disk-by\x2dlabel-mediasync.device
