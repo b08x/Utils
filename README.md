@@ -2,7 +2,6 @@
 
 - [ ] index & descriptions
 
-
 ```shell
 ├── bin
 │   ├── backup.sh
@@ -26,7 +25,8 @@
 │   └── yt-dlp-transcript.sh
 ```
 
+- anything in dev/staging are WIP scripts
 
-* anything in dev/staging are WIP scripts
+- anything in defunct are scripts no longer in use
 
-* anything in defunct are scripts no longer in use
+test
