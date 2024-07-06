@@ -360,9 +360,9 @@ function spinner() {
 function convert_audio_to_text() {
 	local output_file=$1
 	if [ -n "$TRANSLATE" ]; then
-		base_url="http://tinybot.syncopated.net:8081/inference"
+		base_url="http://tinybot.syncopated.net:8082/inference"
 	else
-		base_url="http://tinybot.syncopated.net:8081/inference"
+		base_url="http://tinybot.syncopated.net:8082/inference"
 	fi
 	local curl_command="/usr/bin/curl -s $base_url \
     --header \"Content-Type: multipart/form-data\" \
