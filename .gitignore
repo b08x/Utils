@@ -1,2 +1,3 @@
 lib/python-zita-jacktools/**
 stuff/***
+__pycache__/
