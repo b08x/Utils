@@ -22,3 +22,5 @@ if [[ -d $DELETED ]]; then
 else
 	echo "no usb drive mounted. exiting"
 fi
+
+# rsync -r -n -t -v --progress --ignore-existing -u -l -i -s --exclude=*.git --exclude=*.ray-snapshots/ --exclude=Recordings/*** /srv/storage/ /mnt/bender/backup/Library/

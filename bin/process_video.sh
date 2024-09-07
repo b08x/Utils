@@ -96,9 +96,11 @@ unsilence_audio() {
 
 normalize() {
   local infile="$1"
-  
 
-  ffmpeg-normalize -pr -nt rms "${infile}" -prf "highpass=f=200" -prf "dynaudnorm=p=0.4:s=15" -pof "lowpass=f=7000" -ar 48000 -c:a pcm_s16le --keep-loudness-range-target -o "${normalized}"
+  ffmpeg-normalize -pr -nt rms "${infile}" \
+    -prf "highpass=f=200" -prf "dynaudnorm=p=0.4:s=15" -pof "lowpass=f=7000" \
+    -ar 48000 -c:a pcm_s16le --keep-loudness-range-target \
+    -o "${normalized}"
 }
 
 pipeline() {
