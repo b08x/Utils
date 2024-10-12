@@ -90,7 +90,7 @@ unsilence_audio() {
   local outfile="$2"
   local threshold=$(gum input --prompt "Enter threshold: " --placeholder="-30" --value="-30")
 
-  unsilence -d -ss 4 -sl "${threshold}" "${infile}" "${outfile}"
+  unsilence -d -ss 1.5 -sl "${threshold}" "${infile}" "${outfile}"
 
 }
 

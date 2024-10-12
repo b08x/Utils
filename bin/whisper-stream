@@ -8,7 +8,7 @@ MIN_VOLUME=1%      # Minimum volume threshold
 SILENCE_LENGTH=1.5 # Minimum silence duration in seconds
 ONESHOT=false      # Flag to determine if the script should run once or continuously
 DURATION=0         # Duration of the recording in seconds (0 means continuous)
-MODEL="whisper-1"  # Model for the OpenAI API
+MODEL="Systran/faster-distil-whisper-large-v3"  # Model for the OpenAI API
 TOKEN=""           # OpenAI API token
 OUTPUT_DIR=""      # Directory to save the transcriptions
 DEST_FILE=""       # File to write the transcriptions to
@@ -360,8 +360,10 @@ function spinner() {
 function convert_audio_to_text() {
 	local output_file=$1
 	if [ -n "$TRANSLATE" ]; then
+		# base_url="http://localhost:8021/v1/audio/transcriptions"
 		base_url="http://tinybot.syncopated.net:8082/inference"
 	else
+		# base_url="http://localhost:8021/v1/audio/transcriptions"
 		base_url="http://tinybot.syncopated.net:8082/inference"
 	fi
 	local curl_command="/usr/bin/curl -s $base_url \
@@ -407,7 +409,9 @@ function convert_audio_to_text() {
 
 	if [ -n "${DEST_FILE}" ]; then
 		# Write the transcription to the destination file
+		# LLMEDIT=$(aichat -r transcription_editor 'NLP' "${transcription}")
 		echo "$transcription" >> "${DEST_FILE}"
+		# echo "$LLMEDIT" >> "${DEST_FILE}"
 	fi
 
 	if [ "$ONESHOT" ]; then

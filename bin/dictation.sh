@@ -5,11 +5,11 @@ set -e
 
 # Configuration (possibly source from a .env file)
 declare -rx timestamp_format='%Y-%m-%d_%H-%M-%S'
-declare -rx dictations="$HOME/Recordings/audio/dictations"
+declare -rx dictations="$HOME/Desktop/Dictations"
 declare -rx dictations_tmp="/tmp/audio/dictations"
 
 
-declare -rx localwhisper="http://tinybot.syncopated.net:8081/inference"
+declare -rx localwhisper="http://tinybot.syncopated.net:8082/inference"
 declare -rx hfwhisper="https://api-inference.huggingface.co/models/distil-whisper/distil-large-v2"
 
 
@@ -73,7 +73,7 @@ function transcribe_local() {
 
 function localwhisper_available() {
   # Increase timeout value (e.g., 2) for more robust checking
-  curl --head "http://tinybot.syncopated.net:8081" >/dev/null 2>&1 && return 0
+  curl --head "http://tinybot.syncopated.net:8082" >/dev/null 2>&1 && return 0
   return 1
 }
 
@@ -85,13 +85,16 @@ function capture_audio() {
 		-d 600
 	)
 
-	if [[ "$mic_connected" == "connected" ]]; then
-		capture_args+=(-c 3 -p 'handheld:capture_1' -p 'system:capture_*')
-		remix_channels="1-3"
-	else
-		capture_args+=(-c 2 -p 'system:capture_*')
-		remix_channels="1-2"
-	fi
+	# if [[ "$mic_connected" == "connected" ]]; then
+	# 	capture_args+=(-c 3 -p 'handheld:capture_1' -p 'system:capture_*')
+	# 	remix_channels="1-3"
+	# else
+	# 	capture_args+=(-c 2 -p 'REAPER:out1' -p 'REAPER:out2')
+	# 	remix_channels="1-2"
+	# fi
+
+	capture_args+=(-c 2 -p 'REAPER:out1' -p 'REAPER:out2')
+	remix_channels="1-2"
 
 	tput cup 15 0
 	# Execute capture and conversion
@@ -103,23 +106,23 @@ function capture_audio() {
 		fi
 }
 
-function load_mic() {
-	card=$(cat /proc/asound/cards | grep -E -m1 "PowerMic" | choose 0)
+# function load_mic() {
+# 	card=$(cat /proc/asound/cards | grep -E -m1 "PowerMic" | choose 0)
 	
-	jack_load 'handheld' zalsa_in -i "-d hw:${card},0"
+# 	jack_load 'handheld' zalsa_in -i "-d hw:${card},0"
 	
-	if [[ $? -eq 0 ]]; then
-		mic_connected="connected"
-	fi
-}
+# 	if [[ $? -eq 0 ]]; then
+# 		mic_connected="connected"
+# 	fi
+# }
 
-function check_mic() {
-	if [[ -z $(jack_lsp | grep handheld) ]]; then
-		mic_connected="not connected" 
-	else
-		mic_connected="connected"
-	fi
-}
+# function check_mic() {
+# 	if [[ -z $(jack_lsp | grep handheld) ]]; then
+# 		mic_connected="not connected" 
+# 	else
+# 		mic_connected="connected"
+# 	fi
+# }
 
 function cleanup() {
 	fd ".wav|.mp3" $dictations_tmp -X rm {}
@@ -145,13 +148,13 @@ while true; do
 		cleanup
 	fi
 
-	# check if the Powermic Handheld is connected and loaded
-	check_mic
+	# # check if the Powermic Handheld is connected and loaded
+	# check_mic
 
-	# if not, attempt to load it
-	if [[ "${mic_connected}" == "not connected" ]]; then
-		load_mic || notify-send -t 5000 -u critical "mic not connected"
-	fi
+	# # if not, attempt to load it
+	# if [[ "${mic_connected}" == "not connected" ]]; then
+	# 	load_mic || notify-send -t 5000 -u critical "mic not connected"
+	# fi
 
 	# Determine jack_capture options based on mic presence
 	declare -x timestamp=$(date +"$timestamp_format")
