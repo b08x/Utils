@@ -8,7 +8,7 @@ MIN_VOLUME=1%      # Minimum volume threshold
 SILENCE_LENGTH=1.5 # Minimum silence duration in seconds
 ONESHOT=false      # Flag to determine if the script should run once or continuously
 DURATION=0         # Duration of the recording in seconds (0 means continuous)
-MODEL="Systran/faster-distil-whisper-large-v3"  # Model for the OpenAI API
+MODEL=""  # Model for the OpenAI API
 TOKEN=""           # OpenAI API token
 OUTPUT_DIR=""      # Directory to save the transcriptions
 DEST_FILE=""       # File to write the transcriptions to
@@ -157,7 +157,7 @@ while [[ $# -gt 0 ]]; do
 		fi
 		DEST_FILE="$2"
 
-		OUTPUT_DIR="$HOME/Workspace/Notebook/_transcriptions"
+		# OUTPUT_DIR="$HOME/Workspace/Notebook/_transcriptions"
 		# check if the file exists
 		if [ ! -f "$DEST_FILE" ]; then
 			echo "File does not exist: $DEST_FILE"
@@ -536,6 +536,15 @@ display_settings
 
 # Handle script termination using trap for SIGINT (Ctrl+C) and SIGTSTP (Ctrl+Z)
 trap handle_exit SIGINT SIGTSTP
+
+echo "Choose a notebook:"
+notebook=$(gum file --height=10 --directory "$HOME/Desktop" --file=false)
+if [ ! -d "$notebook" ]; then
+  echo "Error: Selected notebook directory does not exist."
+  exit 1
+fi
+dictations="${notebook}/_dictations"
+mkdir -p "$dictations"
 
 # Main loop to continuously record audio, detect silence, and transcribe audio
 while true; do
