@@ -8,3 +8,4 @@ gensim
 moviepy
 videogrep
 progressbar2
+google-generativeai
