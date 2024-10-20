@@ -321,8 +321,8 @@ def process_video(video_path, project_path, api="deepgram", num_topics=2, groq_p
     with open(results_path, 'w') as f:
         json.dump(results, f, indent=2)
 
-    print("Cleaning up temporary files...")
-    os.remove(raw_audio_path)
+    # print("Cleaning up temporary files...")
+    # os.remove(raw_audio_path)
 
     return results
 
