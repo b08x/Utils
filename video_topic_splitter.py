@@ -1,82 +1,63 @@
 import os
 import argparse
-import time
-import subprocess
+import json
 from dotenv import load_dotenv
 from deepgram import DeepgramClient, PrerecordedOptions, FileSource, DeepgramError
 from groq import Groq
 import sys
+import time
+from pydub import AudioSegment
+from pydub.silence import split_on_silence
+import spacy
+from gensim import corpora
+from gensim.models import LdaMulticore
+from gensim.parsing.preprocessing import STOPWORDS
+import videogrep
 from moviepy.editor import VideoFileClip
-from datetime import datetime
+import progressbar
 
 load_dotenv()
 
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 25MB in bytes
 API_CALL_DELAY = 1  # Delay between API calls in seconds
 
+# Load spaCy model
+nlp = spacy.load("en_core_web_sm")
+
 def create_project_folder(input_video, base_output_dir):
-    """Create a new project folder based on the input video name and timestamp."""
     base_name = os.path.splitext(os.path.basename(input_video))[0]
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
     project_name = f"{base_name}_{timestamp}"
     project_path = os.path.join(base_output_dir, project_name)
     os.makedirs(project_path, exist_ok=True)
     return project_path
 
 def extract_audio(video_path, output_path):
-    """Extract audio from the input video file."""
-    video = VideoFileClip(video_path)
-    audio = video.audio
-    audio.write_audiofile(output_path)
-    video.close()
+    print("Extracting audio from video...")
+    audio = AudioSegment.from_file(video_path)
+    audio.export(output_path, format="wav")
+    print("Audio extraction complete.")
 
 def preprocess_audio(input_file, output_file):
-    """Convert, apply HPF, and normalize audio file to M4A format."""
-    command = [
-        "ffmpeg", "-i", input_file,
-        "-af", "highpass=f=60, acompressor=threshold=-12dB:ratio=4:attack=5:release=50, loudnorm",
-        "-ar", "16000", "-ac", "1",
-        "-c:a", "aac", "-b:a", "128k",
-        "-progress", "pipe:1",
-        output_file
-    ]
-    
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
-    
-    duration = None
-    for line in process.stdout:
-        if line.startswith("Duration: "):
-            duration = line.split()[1].strip(',')
-        if line.startswith("out_time="):
-            current_time = line.split('=')[1].strip()
-            if duration:
-                progress = (time_to_seconds(current_time) / time_to_seconds(duration)) * 100
-                print_progress_bar(progress)
-    
-    process.wait()
-    print()  # New line after progress bar
-
-def time_to_seconds(time_str):
-    h, m, s = time_str.split(':')
-    return int(h) * 3600 + int(m) * 60 + float(s)
-
-def print_progress_bar(progress):
-    bar_length = 50
-    filled_length = int(bar_length * progress // 100)
-    bar = '=' * filled_length + '-' * (bar_length - filled_length)
-    sys.stdout.write(f'\rProgress: [{bar}] {progress:.1f}%')
-    sys.stdout.flush()
+    print("Preprocessing audio...")
+    audio = AudioSegment.from_wav(input_file)
+    high_passed = audio.high_pass_filter(60)
+    normalized = high_passed.normalize()
+    normalized.export(output_file, format="wav")
+    print("Audio preprocessing complete.")
 
 def transcribe_file_deepgram(client, file_path, options, max_retries=3, retry_delay=5):
+    print("Transcribing audio using Deepgram...")
     for attempt in range(max_retries):
         try:
             with open(file_path, "rb") as audio:
                 buffer_data = audio.read()
                 payload: FileSource = {
                     "buffer": buffer_data,
-                    "mimetype": "audio/mp4"
+                    "mimetype": "audio/wav"
                 }
                 response = client.listen.rest.v("1").transcribe_file(payload, options)
+            print("Transcription complete.")
             return response
         except DeepgramError as e:
             if attempt < max_retries - 1:
@@ -88,6 +69,7 @@ def transcribe_file_deepgram(client, file_path, options, max_retries=3, retry_de
             raise e
 
 def transcribe_file_groq(client, file_path, model="whisper-large-v3", language="en"):
+    print("Transcribing audio using Groq...")
     with open(file_path, "rb") as file:
         transcription = client.audio.transcriptions.create(
             file=(os.path.basename(file_path), file.read()),
@@ -95,25 +77,104 @@ def transcribe_file_groq(client, file_path, model="whisper-large-v3", language="
             language=language,
             response_format="text"
         )
+    print("Transcription complete.")
     return transcription
 
-def process_video(video_path, project_path, api="deepgram"):
-    """Process the input video: extract audio, preprocess, and transcribe."""
-    # Create subdirectories
+def preprocess_text(text):
+    print("Preprocessing text...")
+    doc = nlp(text)
+    tokens = [token.lemma_.lower() for token in doc if not token.is_stop and not token.is_punct and token.is_alpha]
+    print("Text preprocessing complete.")
+    return tokens
+
+def perform_topic_modeling(texts, num_topics=5):
+    print(f"Performing topic modeling with {num_topics} topics...")
+    dictionary = corpora.Dictionary(texts)
+    corpus = [dictionary.doc2bow(text) for text in texts]
+    lda_model = LdaMulticore(corpus=corpus, id2word=dictionary, num_topics=num_topics, random_state=100,
+                             chunksize=100, passes=10, per_word_topics=True)
+    print("Topic modeling complete.")
+    return lda_model, corpus, dictionary
+
+def identify_segments(transcript, lda_model, dictionary, num_topics):
+    print("Identifying segments based on topics...")
+    segments = []
+    current_segment = {"start": 0, "end": 0, "content": "", "topic": None}
+    
+    for sentence in progressbar.progressbar(transcript):
+        tokens = preprocess_text(sentence["content"])
+        bow = dictionary.doc2bow(tokens)
+        topic_dist = lda_model.get_document_topics(bow)
+        dominant_topic = max(topic_dist, key=lambda x: x[1])[0] if topic_dist else None
+        
+        if dominant_topic != current_segment["topic"]:
+            if current_segment["content"]:
+                current_segment["end"] = sentence["start"]
+                segments.append(current_segment)
+            current_segment = {
+                "start": sentence["start"],
+                "end": sentence["end"],
+                "content": sentence["content"],
+                "topic": dominant_topic
+            }
+        else:
+            current_segment["end"] = sentence["end"]
+            current_segment["content"] += " " + sentence["content"]
+    
+    if current_segment["content"]:
+        segments.append(current_segment)
+    
+    print(f"Identified {len(segments)} segments.")
+    return segments
+
+def split_video(input_video, segments, output_dir):
+    print("Splitting video into segments...")
+    video = VideoFileClip(input_video)
+    for i, segment in enumerate(progressbar.progressbar(segments)):
+        start_time = segment["start"]
+        end_time = segment["end"]
+        segment_clip = video.subclip(start_time, end_time)
+        output_path = os.path.join(output_dir, f"segment_{i+1}.mp4")
+        segment_clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
+    video.close()
+    print("Video splitting complete.")
+
+def generate_metadata(segments, lda_model):
+    print("Generating metadata for segments...")
+    metadata = []
+    for i, segment in enumerate(progressbar.progressbar(segments)):
+        segment_metadata = {
+            "segment_id": i + 1,
+            "start_time": segment["start"],
+            "end_time": segment["end"],
+            "duration": segment["end"] - segment["start"],
+            "dominant_topic": segment["topic"],
+            "top_keywords": [word for word, _ in lda_model.show_topic(segment["topic"], topn=5)],
+            "transcript": segment["content"]
+        }
+        metadata.append(segment_metadata)
+    print("Metadata generation complete.")
+    return metadata
+
+def process_video(video_path, project_path, api="deepgram", num_topics=5):
+    print(f"Processing video: {video_path}")
     audio_dir = os.path.join(project_path, "audio")
     transcript_dir = os.path.join(project_path, "transcript")
+    segments_dir = os.path.join(project_path, "segments")
     os.makedirs(audio_dir, exist_ok=True)
     os.makedirs(transcript_dir, exist_ok=True)
+    os.makedirs(segments_dir, exist_ok=True)
     
-    # Extract audio
     raw_audio_path = os.path.join(audio_dir, "extracted_audio.wav")
     extract_audio(video_path, raw_audio_path)
     
-    # Preprocess audio
-    preprocessed_audio_path = os.path.join(audio_dir, "preprocessed_audio.m4a")
+    preprocessed_audio_path = os.path.join(audio_dir, "preprocessed_audio.wav")
     preprocess_audio(raw_audio_path, preprocessed_audio_path)
     
-    # Initialize clients
+    print("Parsing transcript with Videogrep...")
+    transcript = videogrep.parse_transcript(video_path)
+    print("Transcript parsing complete.")
+    
     deepgram_key = os.getenv("DG_API_KEY")
     groq_key = os.getenv("GROQ_API_KEY")
 
@@ -134,39 +195,72 @@ def process_video(video_path, project_path, api="deepgram"):
         diarize=True,
     )
 
-    # Transcribe
-    file_size = os.path.getsize(preprocessed_audio_path)
-    if file_size > MAX_FILE_SIZE or api == "deepgram":
-        response = transcribe_file_deepgram(deepgram_client, preprocessed_audio_path, deepgram_options)
-        transcription = response.to_json(indent=4)
-        api_used = "deepgram"
-    else:  # Groq
-        transcription = transcribe_file_groq(groq_client, preprocessed_audio_path)
-        api_used = "groq"
-    
-    # Save transcription
-    transcript_path = os.path.join(transcript_dir, f"transcription_{api_used}.json")
-    with open(transcript_path, 'w') as f:
-        f.write(transcription)
-    
-    # Clean up
+    if not transcript:
+        print("No transcript found. Transcribing audio...")
+        if api == "deepgram":
+            response = transcribe_file_deepgram(deepgram_client, preprocessed_audio_path, deepgram_options)
+            transcription = json.loads(response.to_json())
+            transcript = [
+                {
+                    "content": utterance["transcript"],
+                    "start": utterance["start"],
+                    "end": utterance["end"]
+                }
+                for utterance in transcription['results']['utterances']
+            ]
+        else:  # Groq
+            transcription = transcribe_file_groq(groq_client, preprocessed_audio_path)
+            transcript = [{"content": transcription, "start": 0, "end": AudioSegment.from_wav(preprocessed_audio_path).duration_seconds}]
+
+    full_text = " ".join([sentence["content"] for sentence in transcript])
+    preprocessed_text = preprocess_text(full_text)
+    lda_model, corpus, dictionary = perform_topic_modeling([preprocessed_text], num_topics)
+
+    segments = identify_segments(transcript, lda_model, dictionary, num_topics)
+
+    split_video(video_path, segments, segments_dir)
+
+    metadata = generate_metadata(segments, lda_model)
+
+    print("Saving results...")
+    results = {
+        "transcription": full_text,
+        "api_used": api,
+        "topics": [{"topic_id": topic_id, "words": [word for word, _ in lda_model.show_topic(topic_id, topn=10)]} 
+                   for topic_id in range(num_topics)],
+        "segments": metadata
+    }
+
+    results_path = os.path.join(project_path, "results.json")
+    with open(results_path, 'w') as f:
+        json.dump(results, f, indent=2)
+
+    print("Cleaning up temporary files...")
     os.remove(raw_audio_path)
     os.remove(preprocessed_audio_path)
     
-    return transcription, api_used
+    print("Processing complete.")
+    return results
 
 def main():
     parser = argparse.ArgumentParser(description="Split video based on topics")
     parser.add_argument("-i", "--input", required=True, help="Path to the input video file")
     parser.add_argument("-o", "--output", default=os.getcwd(), help="Base output directory for project folders")
     parser.add_argument("--api", choices=["deepgram", "groq"], default="deepgram", help="Choose API: deepgram or groq")
+    parser.add_argument("--topics", type=int, default=5, help="Number of topics for LDA model")
     args = parser.parse_args()
 
     project_path = create_project_folder(args.input, args.output)
-    transcription, api_used = process_video(args.input, project_path, args.api)
+    print(f"Created project folder: {project_path}")
+
+    results = process_video(args.input, project_path, args.api, args.topics)
     
-    print(f"Processing complete. Project folder: {project_path}")
-    print(f"Transcription saved using {api_used} API in: {os.path.join(project_path, 'transcript', f'transcription_{api_used}.json')}")
+    print(f"\nProcessing complete. Project folder: {project_path}")
+    print(f"Results saved in: {os.path.join(project_path, 'results.json')}")
+    print("\nTop words for each topic:")
+    for topic in results['topics']:
+        print(f"Topic {topic['topic_id'] + 1}: {', '.join(topic['words'])}")
+    print(f"\nGenerated {len(results['segments'])} video segments")
 
 if __name__ == "__main__":
     main()

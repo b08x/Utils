@@ -2,3 +2,9 @@ deepgram-sdk==3.7.4
 python-dotenv
 groq
 ffmpeg-python
+pydub
+spacy
+gensim
+moviepy
+videogrep
+progressbar2
