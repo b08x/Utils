@@ -16,6 +16,7 @@ import videogrep
 from moviepy.editor import VideoFileClip
 import google.generativeai as genai
 from PIL import Image
+import traceback
 
 load_dotenv()
 
@@ -224,12 +225,127 @@ def split_video(input_video, segments, output_dir):
     except Exception as e:
         return f"Error during video splitting: {str(e)}"
 
+def full_pipeline(input_video, output_dir, api="deepgram", num_topics=5, groq_prompt=None, 
+                  lowpass_freq=1000, highpass_freq=100, norm_level=-3, compress=False):
+    """
+    Execute the full video processing pipeline.
+    """
+    try:
+        # Create output directories
+        os.makedirs(output_dir, exist_ok=True)
+        audio_dir = os.path.join(output_dir, "audio")
+        segments_dir = os.path.join(output_dir, "segments")
+        os.makedirs(audio_dir, exist_ok=True)
+        os.makedirs(segments_dir, exist_ok=True)
+
+        # Extract audio
+        raw_audio_path = os.path.join(audio_dir, "extracted_audio.wav")
+        extract_audio(input_video, raw_audio_path)
+
+        # Normalize audio
+        normalized_audio_path = os.path.join(audio_dir, "normalized_audio.wav")
+        compression_params = {
+            "attack_time": 0.2,
+            "decay_time": 1,
+            "soft_knee_db": 2,
+            "threshold": -20,
+            "db_from": -20,
+            "db_to": -10
+        } if compress else None
+        normalize_audio(raw_audio_path, normalized_audio_path, lowpass_freq, highpass_freq, norm_level, compression_params)
+
+        # Transcribe audio
+        if api == "deepgram":
+            transcription = transcribe_file_deepgram(normalized_audio_path)
+            transcript = [
+                {
+                    "content": utterance["transcript"],
+                    "start": utterance["start"],
+                    "end": utterance["end"]
+                }
+                for utterance in transcription.get('results', {}).get('utterances', [])
+            ]
+        else:  # Groq
+            transcription = transcribe_file_groq(normalized_audio_path, prompt=groq_prompt)
+            if isinstance(transcription, dict) and 'segments' in transcription:
+                transcript = [
+                    {
+                        "content": segment.get('text', ''),
+                        "start": segment.get('start', 0),
+                        "end": segment.get('end', 0)
+                    }
+                    for segment in transcription['segments']
+                ]
+            elif isinstance(transcription, str):
+                # If Groq returns a string, create a single segment
+                transcript = [{
+                    "content": transcription,
+                    "start": 0,
+                    "end": 0  # You might want to get the audio duration here
+                }]
+            else:
+                raise ValueError(f"Unexpected transcription format from Groq: {type(transcription)}")
+
+        # Save transcript
+        transcript_path = os.path.join(output_dir, "transcript.json")
+        with open(transcript_path, 'w') as f:
+            json.dump(transcript, f, indent=2)
+
+        # Preprocess text and perform topic modeling
+        full_text = " ".join([sentence["content"] for sentence in transcript])
+        preprocessed_subjects = preprocess_text(full_text)
+        topics = perform_topic_modeling(preprocessed_subjects, num_topics)
+
+        # Identify segments
+        segments = identify_segments(transcript, topics, preprocessed_subjects, num_topics)
+
+        # Split video and analyze segments
+        split_info = split_video(input_video, segments, segments_dir)
+
+        # Analyze segments with Gemini
+        analyzed_segments = []
+        for segment in split_info:
+            gemini_analysis = analyze_segment_with_gemini(segment['output_path'], segment['transcript'])
+            analyzed_segments.append({
+                **segment,
+                "gemini_analysis": gemini_analysis
+            })
+
+        # Prepare final results
+        results = {
+            "input_video": input_video,
+            "normalized_audio": normalized_audio_path,
+            "transcription_api": api,
+            "transcript_path": transcript_path,
+            "topics": topics,
+            "segments": analyzed_segments
+        }
+
+        # Save results
+        results_path = os.path.join(output_dir, "results.json")
+        with open(results_path, 'w') as f:
+            json.dump(results, f, indent=2)
+
+        return {
+            "status": "success",
+            "message": "Full pipeline completed successfully",
+            "results_path": results_path
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Error during full pipeline execution: {str(e)}",
+            "traceback": traceback.format_exc()
+        }
+
+
 def main():
     parser = argparse.ArgumentParser(description="Video processing utility functions")
-    parser.add_argument("function", choices=["extract_audio", "transcribe_deepgram", "transcribe_groq", 
+    parser.add_argument("function", nargs='?', choices=["extract_audio", "transcribe_deepgram", "transcribe_groq", 
                                              "preprocess_text", "topic_modeling", "identify_segments", 
                                              "analyze_segment", "split_video", "normalize_audio"],
-                        help="Function to execute")
+                        help="Function to execute (if not specified, full pipeline will be executed)")
     parser.add_argument("-i", "--input", required=True, help="Input file path")
     parser.add_argument("-o", "--output", help="Output file or directory path")
     parser.add_argument("--topics", type=int, default=5, help="Number of topics for LDA model")
@@ -241,44 +357,49 @@ def main():
     parser.add_argument("--compress", action="store_true", help="Apply compression")
     args = parser.parse_args()
 
-    result = None
-
-    if args.function == "normalize_audio":
-        compression_params = {
-            "attack_time": 0.2,
-            "decay_time": 1,
-            "soft_knee_db": 2,
-            "threshold": -20,
-            "db_from": -20,
-            "db_to": -10
-        } if args.compress else None
-        
-        result = normalize_audio(args.input, args.output, args.lowpass, args.highpass, args.norm_level, compression_params)
-    elif args.function == "extract_audio":
-        result = extract_audio(args.input, args.output)
-    elif args.function == "transcribe_deepgram":
-        result = transcribe_file_deepgram(args.input)
-    elif args.function == "transcribe_groq":
-        result = transcribe_file_groq(args.input, prompt=args.prompt)
-    elif args.function == "preprocess_text":
-        with open(args.input, 'r') as f:
-            text = f.read()
-        result = preprocess_text(text)
-    elif args.function == "topic_modeling":
-        with open(args.input, 'r') as f:
-            subjects = json.load(f)
-        result = perform_topic_modeling(subjects, args.topics)
-    elif args.function == "identify_segments":
-        # This requires more complex input, you might need to adjust based on your needs
-        pass
-    elif args.function == "analyze_segment":
-        with open(args.input, 'r') as f:
-            transcript = f.read()
-        result = analyze_segment_with_gemini(args.output, transcript)
-    elif args.function == "split_video":
-        with open(args.input, 'r') as f:
-            segments = json.load(f)
-        result = split_video(args.output, segments, os.path.dirname(args.output))
+    if args.function is None:
+        # Execute full pipeline
+        result = full_pipeline(args.input, args.output or os.getcwd(), args.api, args.topics, args.prompt,
+                               args.lowpass, args.highpass, args.norm_level, args.compress)
+    else:
+        # Execute specific function
+        result = None
+        if args.function == "normalize_audio":
+            compression_params = {
+                "attack_time": 0.2,
+                "decay_time": 1,
+                "soft_knee_db": 2,
+                "threshold": -20,
+                "db_from": -20,
+                "db_to": -10
+            } if args.compress else None
+            
+            result = normalize_audio(args.input, args.output, args.lowpass, args.highpass, args.norm_level, compression_params)
+        elif args.function == "extract_audio":
+            result = extract_audio(args.input, args.output)
+        elif args.function == "transcribe_deepgram":
+            result = transcribe_file_deepgram(args.input)
+        elif args.function == "transcribe_groq":
+            result = transcribe_file_groq(args.input, prompt=args.prompt)
+        elif args.function == "preprocess_text":
+            with open(args.input, 'r') as f:
+                text = f.read()
+            result = preprocess_text(text)
+        elif args.function == "topic_modeling":
+            with open(args.input, 'r') as f:
+                subjects = json.load(f)
+            result = perform_topic_modeling(subjects, args.topics)
+        elif args.function == "identify_segments":
+            # This requires more complex input, you might need to adjust based on your needs
+            pass
+        elif args.function == "analyze_segment":
+            with open(args.input, 'r') as f:
+                transcript = f.read()
+            result = analyze_segment_with_gemini(args.output, transcript)
+        elif args.function == "split_video":
+            with open(args.input, 'r') as f:
+                segments = json.load(f)
+            result = split_video(args.output, segments, os.path.dirname(args.output))
 
     json.dump(result, sys.stdout, indent=2)
 

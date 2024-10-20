@@ -1,4 +1,5 @@
 import os
+import subprocess
 import argparse
 import json
 from dotenv import load_dotenv
@@ -28,6 +29,62 @@ def create_project_folder(input_path, base_output_dir):
     project_path = os.path.join(base_output_dir, project_name)
     os.makedirs(project_path, exist_ok=True)
     return project_path
+
+def convert_to_mono_and_resample(input_file, output_file, sample_rate=16000):
+    """Converts audio to mono, resamples, applies gain control, and a high-pass filter."""
+    try:
+        command = [
+            "ffmpeg",
+            "-i", input_file,
+            "-af",  # Use -af for a filterchain
+                f"volume={-3}dB,highpass=f=500",  # Reduce volume by 6dB before highpass
+            "-ac", "1",  # Convert to mono
+            "-ar", str(sample_rate),  # Resample to the specified rate
+            output_file
+        ]
+        subprocess.run(command, check=True)
+        return {
+            "status": "success",
+            "message": f"Audio converted to mono, resampled to {sample_rate}Hz, gain-adjusted, high-pass filtered, and saved to {output_file}"
+        }
+    except subprocess.CalledProcessError as e:
+        return {
+            "status": "error",
+            "message": f"Error during audio conversion: {str(e)}"
+        }
+
+def normalize_audio(input_file, output_file, lowpass_freq=7000, highpass_freq=200):
+    """
+    Normalize audio using ffmpeg-normalize as a subprocess.
+    """
+    command = [
+        "ffmpeg-normalize",
+        "-pr",  # Preserve ReplayGain tags
+        "-tp", "-3.5",  # Reduced target peak level to -3.5 dB
+        "-nt", "rms", 
+        input_file,
+        "-prf", f"highpass=f={highpass_freq}", 
+        "-prf", "dynaudnorm=p=0.4:s=15:targetrms=0.5",
+        "-pof", f"lowpass=f={lowpass_freq}", 
+        "-ar", "48000", 
+        "-c:a", "pcm_s16le", 
+        "--keep-loudness-range-target", 
+        "-o", output_file
+    ]
+
+    try:
+        subprocess.run(command, check=True)
+        return {
+            "status": "success",
+            "message": f"Audio normalized and saved to {output_file}",
+            "lowpass_freq": lowpass_freq,
+            "highpass_freq": highpass_freq
+        }
+    except subprocess.CalledProcessError as e:
+        return {
+            "status": "error",
+            "message": f"Error during audio normalization: {str(e)}"
+        }
 
 def extract_audio(video_path, output_path):
     print("Extracting audio from video...")
@@ -264,7 +321,25 @@ def process_video(video_path, project_path, api="deepgram", num_topics=2, groq_p
     os.makedirs(segments_dir, exist_ok=True)
 
     raw_audio_path = os.path.join(audio_dir, "extracted_audio.wav")
+    normalized_audio_path = os.path.join(audio_dir, "normalized_audio.wav")
     extract_audio(video_path, raw_audio_path)
+
+    # Normalize audio
+    normalize_result = normalize_audio(raw_audio_path, normalized_audio_path)
+    if normalize_result["status"] == "error":
+        print(f"Error during audio normalization: {normalize_result['message']}")
+        # Handle the error (e.g., exit or continue without normalization)
+    else:
+        print(normalize_result["message"])
+
+    # Convert to mono and resample for transcription
+    mono_resampled_audio_path = os.path.join(audio_dir, "mono_resampled_audio.wav")
+    conversion_result = convert_to_mono_and_resample(normalized_audio_path, mono_resampled_audio_path)
+    if conversion_result["status"] == "error":
+        print(f"Error during audio conversion: {conversion_result['message']}")
+        # Handle the error (e.g., exit or continue without conversion)
+    else:
+        print(conversion_result["message"])
 
     print("Parsing transcript with Videogrep...")
     transcript = videogrep.parse_transcript(video_path)
@@ -290,7 +365,8 @@ def process_video(video_path, project_path, api="deepgram", num_topics=2, groq_p
                 utterances=True,
                 diarize=True,
             )
-            transcription = transcribe_file_deepgram(deepgram_client, raw_audio_path, deepgram_options)
+            # Transcribe the normalized audio
+            transcription = transcribe_file_deepgram(deepgram_client, mono_resampled_audio_path, deepgram_options)
             transcript = [
                 {
                     "content": utterance["transcript"],
@@ -301,7 +377,8 @@ def process_video(video_path, project_path, api="deepgram", num_topics=2, groq_p
             ]
         else:  # Groq
             groq_client = Groq(api_key=groq_key)
-            transcription = transcribe_file_groq(groq_client, raw_audio_path, prompt=groq_prompt)
+            # Transcribe the normalized audio
+            transcription = transcribe_file_groq(groq_client, mono_resampled_audio_path, prompt=groq_prompt)
             transcript = [{"content": segment['text'], "start": segment['start'], "end": segment['end']} 
                           for segment in transcription['segments']]
 
@@ -323,8 +400,10 @@ def process_video(video_path, project_path, api="deepgram", num_topics=2, groq_p
 
     # print("Cleaning up temporary files...")
     # os.remove(raw_audio_path)
+    # os.remove(normalized_audio_path) # Uncomment to remove normalized audio
 
     return results
+
 
 def main():
     parser = argparse.ArgumentParser(description="Process video or transcript for topic-based segmentation and multi-modal analysis")
