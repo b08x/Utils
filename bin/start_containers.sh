@@ -12,7 +12,7 @@ start_containers() {
   else
     docker-compose up -d
   fi
-  sleep 3
+  sleep 5
 }
 
 # Function to stop containers for a given directory and compose file (optional)
@@ -27,7 +27,7 @@ stop_containers() {
   else
     docker-compose down
   fi
-  sleep 3
+  sleep 5
 }
 
 # Check for command line arguments
@@ -44,17 +44,23 @@ case "$action" in
     # Start containers for all applications
     start_containers "$HOME/Workspace/flowbots" 
     start_containers "$HOME/LocalLLM/LLMOS/dify/docker" 
-    # start_containers "$HOME/LLMOS/SillyTavern/docker" "docker-compose-standalone.yml" # Specify compose file for SillyTavern
     start_containers "$HOME/LocalLLM/LLMOS/big-AGI"
+    start_containers "$HOME/LocalLLM/SillyTavern/docker"
+    start_containers "$HOME/LocalLLM/SillyTavern-Extras/docker"
+    start_containers "$HOME/LocalLLM/lobe-chat/docker-compose/local"
     docker container start ollama
+    docker container start local-ai
     ;;
   stop)
     # Stop containers for all applications
-    stop_containers "$HOME/Workspace/flowbots"
+    stop_containers "$HOME/Workspace/flowbots" 
     stop_containers "$HOME/LocalLLM/LLMOS/dify/docker" 
-    # stop_containers "$HOME/LLMOS/SillyTavern/docker" "docker-compose-standalone.yml" # Specify compose file for SillyTavern
     stop_containers "$HOME/LocalLLM/LLMOS/big-AGI"
+    stop_containers "$HOME/LocalLLM/SillyTavern/docker"
+    stop_containers "$HOME/LocalLLM/SillyTavern-Extras/docker"
+    stop_containers "$HOME/LocalLLM/lobe-chat/docker-compose/local"
     docker container stop ollama
+    docker container stop local-ai
     ;;
   *)
     echo "Invalid action: $action. Choose either 'start' or 'stop'."
