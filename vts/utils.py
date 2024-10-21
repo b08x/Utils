@@ -4,6 +4,8 @@ import time
 import json
 import progressbar
 import videogrep  # Make sure videogrep is installed
+from deepgram import DeepgramClient, PrerecordedOptions, FileSource, DeepgramError
+from groq import Groq
 
 parent_directory = os.path.abspath('..')
 
@@ -15,7 +17,6 @@ from vts import (
     metadata_generation,
     segment_analysis,
     topic_modeling,
-    transcription,
     utils,
 )
 
@@ -28,6 +29,49 @@ def create_project_folder(input_path, base_output_dir):
     os.makedirs(project_path, exist_ok=True)
     return project_path
 
+def transcribe_file_deepgram(client, file_path, options, max_retries=3, retry_delay=5):
+    print("Transcribing audio using Deepgram...")
+    for attempt in range(max_retries):
+        try:
+            with open(file_path, "rb") as audio:
+                buffer_data = audio.read()
+                payload: FileSource = {"buffer": buffer_data, "mimetype": "audio/mp4"}
+                response = client.listen.rest.v("1").transcribe_file(payload, options)
+            print("Transcription complete.")
+            return json.loads(response.to_json())
+        except DeepgramError as e:
+            if attempt < max_retries - 1:
+                print(
+                    f"API call failed. Retrying in {retry_delay} seconds... (Attempt {attempt + 1}/{max_retries})"
+                )
+                time.sleep(retry_delay)
+            else:
+                print(f"Transcription failed after {max_retries} attempts: {str(e)}")
+                raise
+        except Exception as e:
+            print(f"Unexpected error during transcription: {str(e)}")
+            raise
+
+
+def transcribe_file_groq(
+    client, file_path, model="whisper-large-v3", language="en", prompt=None
+):
+    print("Transcribing audio using Groq...")
+    try:
+        with open(file_path, "rb") as file:
+            transcription = client.audio.transcriptions.create(
+                file=(file_path, file.read()),
+                model=model,
+                prompt=prompt,
+                response_format="verbose_json",
+                language=language,
+                temperature=0.2
+            )
+        print("Transcription complete.")
+        return json.loads(transcription.text)
+    except Exception as e:
+        print(f"Error during Groq transcription: {str(e)}")
+        raise
 
 def handle_audio_video(video_path, project_path):
     audio_dir = os.path.join(project_path, "audio")
@@ -106,7 +150,7 @@ def handle_transcription(
                 sentiment=True,
             )
             # Transcribe the normalized audio
-            transcription = transcription.transcribe_file_deepgram(
+            transcription = transcribe_file_deepgram(
                 deepgram_client, audio_path, deepgram_options
             )
             transcript = [
@@ -120,7 +164,7 @@ def handle_transcription(
         else:  # Groq
             groq_client = Groq(api_key=groq_key)
             # Transcribe the normalized audio
-            transcription = transcription.transcribe_file_groq(
+            transcription = transcribe_file_groq(
                 groq_client, audio_path, prompt=groq_prompt
             )
             transcript = [
@@ -178,13 +222,13 @@ def process_video(
 
 def process_transcript(transcript, project_path, num_topics=5):
     full_text = " ".join([sentence["content"] for sentence in transcript])
-    preprocessed_subjects = preprocess_text(full_text)
-    lda_model, corpus, dictionary = perform_topic_modeling(
+    preprocessed_subjects = topic_modeling.preprocess_text(full_text)
+    lda_model, corpus, dictionary = topic_modeling.perform_topic_modeling(
         preprocessed_subjects, num_topics
     )
 
-    segments = identify_segments(transcript, lda_model, dictionary, num_topics)
-    metadata = generate_metadata(segments, lda_model)
+    segments = topic_modeling.identify_segments(transcript, lda_model, dictionary, num_topics)
+    metadata = metadata_generation.generate_metadata(segments, lda_model)
 
     results = {
         "topics": [

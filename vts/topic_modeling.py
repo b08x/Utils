@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import progressbar
 import spacy
 from gensim import corpora
@@ -15,7 +16,6 @@ from vts import (
     metadata_generation,
     segment_analysis,
     topic_modeling,
-    transcription,
     utils,
 )
 

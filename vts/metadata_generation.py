@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import progressbar
 
 parent_directory = os.path.abspath('..')
@@ -12,7 +13,6 @@ from vts import (
     metadata_generation,
     segment_analysis,
     topic_modeling,
-    transcription,
     utils,
 )
 

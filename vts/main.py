@@ -3,6 +3,7 @@
 import os
 import sys
 import argparse
+import json
 from dotenv import load_dotenv
 import videogrep  # Make sure videogrep is installed
 import progressbar  # Make sure progressbar2 is installed
@@ -17,7 +18,6 @@ from vts import (
     metadata_generation,
     segment_analysis,
     topic_modeling,
-    transcription,
     utils,
 )
 

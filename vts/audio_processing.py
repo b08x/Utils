@@ -1,6 +1,7 @@
 import os
 import sys
 import subprocess
+import json
 import progressbar
 from pydub import AudioSegment
 
@@ -14,7 +15,6 @@ from vts import (
     metadata_generation,
     segment_analysis,
     topic_modeling,
-    transcription,
     utils,
 )
 
@@ -63,9 +63,9 @@ def normalize_audio(input_file, output_file, lowpass_freq=8000, highpass_freq=10
             "-prf",
             f"highpass=f={highpass_freq}",
             "-prf",
-            "dynaudnorm=p=0.4:s=15",
+            "dynaudnorm=p=0.4:s=15, loudnorm",
             "-pof",
-            f"lowpass=f={lowpass_freq}",
+            f"lowpass=f={lowpass_freq}, loudnorm",
             "-ar",
             "48000",
             "-c:a",
