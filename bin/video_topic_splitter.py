@@ -71,6 +71,8 @@ def normalize_audio(input_file, output_file, lowpass_freq=8000, highpass_freq=10
         command = [
             "ffmpeg-normalize",
             "-pr",  # Preserve ReplayGain tags
+            "-tp",
+            "-3.0",
             "-nt",
             "rms",
             input_file,
@@ -505,7 +507,7 @@ def handle_transcription(
             ]
 
     save_transcription(transcription, project_path)
-    
+
     save_transcript(transcript, project_path)
     results = process_transcript(transcript, project_path, num_topics)
 
