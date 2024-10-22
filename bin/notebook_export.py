@@ -3,47 +3,49 @@ import shutil
 import re
 from pathlib import Path
 import argparse
+import urllib.parse
 
 def get_asset_subfolder(file_path):
     """Determine the appropriate assets subfolder based on file extension"""
     extension = file_path.lower().split('.')[-1]
     
-    # Image files
     if extension in ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'svg', 'webp']:
         return 'img'
-    # Audio files
     elif extension in ['mp3', 'wav', 'ogg', 'm4a', 'flac']:
         return 'audio'
-    # Video files
     elif extension in ['mp4', 'mov', 'avi', 'mkv', 'webm']:
         return 'video'
-    # PDF files
     elif extension == 'pdf':
         return 'pdf'
-    # Default case
     else:
         return 'other'
 
+def extract_title_from_path(path):
+    """Extract the title from a markdown file path"""
+    # Remove the .md extension if present
+    base_name = os.path.basename(path)
+    if base_name.lower().endswith('.md'):
+        base_name = base_name[:-3]
+    
+    # URL decode the name
+    decoded_name = urllib.parse.unquote(base_name)
+    return decoded_name
+
 def copy_markdown_files(source, destination_folder):
-    # Resolve home directory if present in paths
     source = os.path.expanduser(source)
     destination_folder = os.path.expanduser(destination_folder)
     
-    # If source is a folder, create the same folder name in destination
     if os.path.isdir(source):
         base_folder_name = os.path.basename(os.path.normpath(source))
         notes_folder = os.path.join(destination_folder, base_folder_name)
     else:
         notes_folder = destination_folder
     
-    # Create destination folder structure
     os.makedirs(notes_folder, exist_ok=True)
     
-    # Create assets folder and subfolders in the root of destination
     root_destination = os.path.dirname(destination_folder.rstrip(os.path.sep))
     assets_root = os.path.join(root_destination, 'assets')
     
-    # Create all asset subfolders
     asset_subfolders = ['img', 'audio', 'video', 'pdf', 'other']
     for subfolder in asset_subfolders:
         os.makedirs(os.path.join(assets_root, subfolder), exist_ok=True)
@@ -53,12 +55,33 @@ def copy_markdown_files(source, destination_folder):
         with open(file_path, 'r', encoding='utf-8') as file:
             content = file.read()
         
-        # Process backlinks
+        # Process existing double-bracketed links first
         backlinks = re.findall(r'\[\[(.*?)\]\]', content)
         for backlink in backlinks:
             backlink_path = os.path.join(source_folder, f"{backlink}.md")
             if os.path.exists(backlink_path):
                 process_file(backlink_path)
+        
+        # Convert markdown links to double brackets if they point to .md files
+        def convert_markdown_link(match):
+            text = match.group(1)
+            link = match.group(2)
+            
+            # Check if it's a markdown file link
+            if link.lower().endswith('.md'):
+                # Extract the title from the path
+                title = extract_title_from_path(link)
+                # Process the linked file if it exists
+                full_link_path = os.path.join(source_folder, link)
+                if os.path.exists(full_link_path):
+                    process_file(full_link_path)
+                return f"[[{title}]]"
+            
+            # Return original link if it's not a markdown file
+            return match.group(0)
+        
+        # Convert markdown links to double brackets
+        content = re.sub(r'\[(.*?)\]\((.*?)\)', convert_markdown_link, content)
         
         # Process attachments and wrap images with liquid tags
         def replace_attachment(match):
@@ -66,27 +89,22 @@ def copy_markdown_files(source, destination_folder):
             full_attachment_path = os.path.join(source_folder, attachment_path)
             
             if os.path.exists(full_attachment_path):
-                # Determine appropriate subfolder
                 asset_subfolder = get_asset_subfolder(attachment_path)
-                
-                # Create new path within appropriate subfolder
                 new_attachment_name = os.path.basename(attachment_path)
                 new_attachment_path = f'/assets/{asset_subfolder}/{new_attachment_name}'
-                
-                # Copy file to appropriate subfolder
                 dest_asset_path = os.path.join(root_destination, new_attachment_path.lstrip('/'))
                 shutil.copy2(full_attachment_path, dest_asset_path)
                 
-                # If it's an image, use picture tag, otherwise use markdown link
                 if asset_subfolder == 'img':
-                    return f'{{% picture {new_attachment_path} --alt {alt_text} %}}'
+                    return f'{{% picture {new_attachment_name} --alt {alt_text} %}}'
                 else:
                     return f'![{alt_text}]({new_attachment_path})'
             return match.group(0)
 
+        # Only process image/attachment links (not already processed markdown links)
         content = re.sub(r'!\[(.*?)\]\((.*?)\)', replace_attachment, content)
         
-        # Detect and process Mermaid and PlantUML code blocks
+        # Process Mermaid and PlantUML code blocks
         def process_code_blocks(match):
             code_type = match.group(1).lower()
             code_content = match.group(2)
@@ -100,7 +118,6 @@ def copy_markdown_files(source, destination_folder):
 
         content = re.sub(r'```(\w+)\n(.*?)```', process_code_blocks, content, flags=re.DOTALL)
         
-        # Calculate relative path and create destination path
         if os.path.isdir(source):
             rel_path = os.path.relpath(file_path, source)
             dest_path = os.path.join(notes_folder, rel_path)
@@ -134,7 +151,7 @@ def copy_markdown_files(source, destination_folder):
         raise ValueError("Invalid source. Must be a file, folder, or list of files.")
 
 def main():
-    parser = argparse.ArgumentParser(description="Copy Markdown files with organized asset structure.")
+    parser = argparse.ArgumentParser(description="Copy Markdown files with double bracket link conversion.")
     parser.add_argument("source", nargs='+', help="Source file(s) or folder")
     parser.add_argument("destination", help="Destination folder")
     args = parser.parse_args()
