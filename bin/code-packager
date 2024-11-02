@@ -74,8 +74,22 @@ check_dependencies() {
     fi
 }
 
+# Handle long options first
+for arg in "$@"; do
+    case "$arg" in
+        --help)
+            show_help
+            exit 0
+            ;;
+        --version)
+            show_version
+            exit 0
+            ;;
+    esac
+done
+
 # Parse command line arguments
-while getopts "t:o:i:e:s:g:d:z:m:vh-" opt; do
+while getopts "t:o:i:e:s:g:d:z:m:vh" opt; do
     case $opt in
         t) DIRECTORY_PATH="${OPTARG}" ;;
         o) OUTPUT_FILE="${OPTARG}" ;;
@@ -102,14 +116,8 @@ while getopts "t:o:i:e:s:g:d:z:m:vh-" opt; do
            exit 0 ;;
         h) show_help
            exit 0 ;;
-        -) case "${OPTARG}" in
-             version) show_version
-                      exit 0 ;;
-             help) show_help
-                  exit 0 ;;
-             *) echo "Error: Invalid option -${OPTARG}. Use -h or --help for usage information." >&2
-                exit 1 ;;
-           esac ;;
+        \?) echo "Error: Invalid option -$OPTARG. Use -h or --help for usage information." >&2
+            exit 1 ;;
     esac
 done
 
@@ -174,14 +182,28 @@ process_file() {
 
     local filesize=$($STAT_CMD "$file")
     if [ "$filesize" -le $((MAX_SIZE * 1024)) ]; then
-        if is_binary "$file"; then
-            local content="null" # Do not include content for binary files
-        else
-            local content=$(jq -Rs . < "$file")
-        fi
         local filename=$(basename "$file")
         local dirpath=$(dirname "$file" | sed "s|^$DIRECTORY_PATH||")
-        echo "{\"filename\":\"$filename\", \"content\":$content, \"path\":\"$dirpath/\"}"
+
+        # Create a temporary file for the JSON output
+        local temp_json=$(mktemp)
+
+        if is_binary "$file"; then
+            # For binary files, create JSON with null content
+            jq -n --arg filename "$filename" \
+               --arg path "$dirpath/" \
+               '{filename: $filename, path: $path, content: null}' > "$temp_json"
+        else
+            # For text files, read content and create JSON
+            jq -n --arg filename "$filename" \
+               --arg path "$dirpath/" \
+               --rawfile content "$file" \
+               '{filename: $filename, path: $path, content: $content}' > "$temp_json"
+        fi
+
+        # Output the JSON and remove temp file
+        cat "$temp_json"
+        rm "$temp_json"
     fi
 }
 

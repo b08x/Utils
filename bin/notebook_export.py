@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import os
 import shutil
 import re
@@ -60,6 +62,7 @@ def copy_markdown_files(source, destination_folder):
         for backlink in backlinks:
             backlink_path = os.path.join(source_folder, f"{backlink}.md")
             if os.path.exists(backlink_path):
+                print(f"Processing backlink: {backlink_path}")
                 process_file(backlink_path)
         
         # Convert markdown links to double brackets if they point to .md files
@@ -74,6 +77,7 @@ def copy_markdown_files(source, destination_folder):
                 # Process the linked file if it exists
                 full_link_path = os.path.join(source_folder, link)
                 if os.path.exists(full_link_path):
+                    print(f"Processing markdown link: {full_link_path}")
                     process_file(full_link_path)
                 return f"[[{title}]]"
             
