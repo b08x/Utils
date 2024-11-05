@@ -1,0 +1,32 @@
+[project]
+name = "vts"
+version = "0.2.0"
+description = "Video Topic Segmentation - Analyze and segment videos based on content topics"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"},
+]
+dependencies = [
+    "scipy>=1.13.0",
+    "numpy>=1.26.0",
+    "pydub>=0.25.1",
+    "spacy>=3.7.2",
+    "gensim>=4.3.2",
+    "videogrep>=2.0.0",
+    "deepgram-sdk==3.7.4",
+    "groq==0.11.0",
+    "google-generativeai>=0.6.0",
+    "moviepy>=1.0.3",
+    "progressbar2>=4.2.0",
+    "python-dotenv>=1.0.0",
+    "pydantic_settings==2.6.0",
+    "timedelta",
+    "librosa",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
