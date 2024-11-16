@@ -7,6 +7,13 @@ import sys
 parent_directory = os.path.abspath('..')
 
 sys.path.append(parent_directory)
+
+# from core import process_video
+# from project import create_project_folder, load_checkpoint
+# from constants import CHECKPOINTS
+# from transcription import load_transcript
+# from core import process_transcript
+
 from video_topic_splitter import (
     core,
     project,

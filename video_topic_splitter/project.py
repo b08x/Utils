@@ -5,6 +5,11 @@ import os
 import time
 import pickle
 import glob
+import sys
+parent_directory = os.path.abspath('..')
+
+sys.path.append(parent_directory)
+
 from constants import CHECKPOINTS
 
 def create_project_folder(input_path, base_output_dir):

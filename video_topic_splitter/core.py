@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 """Core processing functionality for video topic splitter."""
 
 import os
@@ -8,7 +7,10 @@ from dotenv import load_dotenv
 import videogrep
 from deepgram import DeepgramClient, PrerecordedOptions
 from groq import Groq
+import sys
+parent_directory = os.path.abspath('..')
 
+sys.path.append(parent_directory)
 from constants import CHECKPOINTS
 from project import save_checkpoint
 from audio import (
@@ -34,38 +36,68 @@ from video_analysis import split_and_analyze_video
 load_dotenv()
 
 def handle_audio_video(video_path, project_path):
-    """Process audio from video file."""
+    """Process audio from video file with checkpointing and file existence checks."""
     audio_dir = os.path.join(project_path, "audio")
     os.makedirs(audio_dir, exist_ok=True)
 
+    # Define paths
     normalized_video_path = os.path.join(project_path, "normalized_video.mkv")
-    normalize_result = normalize_audio(video_path, normalized_video_path)
-    if normalize_result["status"] == "error":
-        print(f"Error during audio normalization: {normalize_result['message']}")
-    else:
-        print(normalize_result["message"])
-
-    # Remove silence
     unsilenced_video_path = os.path.join(project_path, "unsilenced_video.mkv")
-    # Note: silence removal temporarily disabled
-    silence_removal_result = remove_silence(normalized_video_path, unsilenced_video_path)
-
-    # Extract audio from unsilenced video
     raw_audio_path = os.path.join(audio_dir, "extracted_audio.wav")
-    extract_audio(unsilenced_video_path, raw_audio_path)
-
-    # Convert to mono and resample for transcription
     mono_resampled_audio_path = os.path.join(audio_dir, "mono_resampled_audio.m4a")
-    conversion_result = convert_to_mono_and_resample(raw_audio_path, mono_resampled_audio_path)
-    if conversion_result["status"] == "error":
-        print(f"Error during audio conversion: {conversion_result['message']}")
-    else:
-        print(conversion_result["message"])
 
-    save_checkpoint(project_path, CHECKPOINTS['AUDIO_PROCESSED'], {
-        'unsilenced_video_path': unsilenced_video_path,
-        'mono_resampled_audio_path': mono_resampled_audio_path
-    })
+    # Check for existing processed files
+    if os.path.exists(unsilenced_video_path) and os.path.exists(mono_resampled_audio_path):
+        print("Found existing processed audio files. Using cached versions.")
+        return unsilenced_video_path, mono_resampled_audio_path
+
+    # Normalize audio if needed
+    if not os.path.exists(normalized_video_path):
+        print("Normalizing audio...")
+        normalize_result = normalize_audio(video_path, normalized_video_path)
+        if normalize_result["status"] == "error":
+            print(f"Error during audio normalization: {normalize_result['message']}")
+            raise RuntimeError("Audio normalization failed")
+        else:
+            print(normalize_result["message"])
+    else:
+        print("Using existing normalized video file.")
+
+    # For now, we'll just copy the normalized video to unsilenced path since silence removal is disabled
+    if not os.path.exists(unsilenced_video_path):
+        import shutil
+        shutil.copy2(normalized_video_path, unsilenced_video_path)
+        print("Created unsilenced video file (silence removal currently disabled).")
+
+    # Extract audio if needed
+    if not os.path.exists(raw_audio_path):
+        print("Extracting audio from video...")
+        try:
+            extract_audio(unsilenced_video_path, raw_audio_path)
+            print("Audio extraction complete.")
+        except Exception as e:
+            print(f"Error during audio extraction: {str(e)}")
+            raise
+
+    # Convert to mono and resample if needed
+    if not os.path.exists(mono_resampled_audio_path):
+        print("Converting audio to mono and resampling...")
+        conversion_result = convert_to_mono_and_resample(raw_audio_path, mono_resampled_audio_path)
+        if conversion_result["status"] == "error":
+            print(f"Error during audio conversion: {conversion_result['message']}")
+            raise RuntimeError("Audio conversion failed")
+        else:
+            print(conversion_result["message"])
+    else:
+        print("Using existing mono resampled audio file.")
+
+    # Save checkpoint only if we've successfully processed everything
+    if os.path.exists(unsilenced_video_path) and os.path.exists(mono_resampled_audio_path):
+        save_checkpoint(project_path, CHECKPOINTS['AUDIO_PROCESSED'], {
+            'unsilenced_video_path': unsilenced_video_path,
+            'mono_resampled_audio_path': mono_resampled_audio_path
+        })
+        print("Audio processing checkpoint saved.")
 
     return unsilenced_video_path, mono_resampled_audio_path
 
@@ -171,10 +203,28 @@ def handle_transcription(video_path, audio_path, project_path, api="deepgram", n
     results = process_transcript(transcript, project_path, num_topics)
 
     # Split the video and analyze segments
-    analyzed_segments = split_and_analyze_video(video_path, results["segments"], segments_dir)
-
-    # Update results with analyzed segments
-    results["analyzed_segments"] = analyzed_segments
+    try:
+        analyzed_segments = split_and_analyze_video(video_path, results["segments"], segments_dir)
+        
+        # Update results with analyzed segments
+        results["analyzed_segments"] = analyzed_segments
+        
+        # Save results after successful analysis
+        results_path = os.path.join(project_path, "results.json")
+        with open(results_path, "w") as f:
+            json.dump(results, f, indent=2)
+            
+        print(f"Successfully analyzed {len(analyzed_segments)} segments")
+    except Exception as e:
+        print(f"Error during video analysis: {str(e)}")
+        # Load any segments that were successfully analyzed
+        try:
+            analyzed_segments = split_and_analyze_video(video_path, [], segments_dir)  # Just load existing
+            results["analyzed_segments"] = analyzed_segments
+            print(f"Recovered {len(analyzed_segments)} previously analyzed segments")
+        except Exception as load_error:
+            print(f"Could not load analyzed segments: {str(load_error)}")
+            results["analyzed_segments"] = []
 
     # Save updated results
     results_path = os.path.join(project_path, "results.json")
